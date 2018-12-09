@@ -1,5 +1,5 @@
 # tests for the capy file, so we know that each function is performing as expected
-# Tyler Piazza, 12/5
+# Tyler Piazza, 12/6
 import numpy as np
 import networkx as nx
 import json
