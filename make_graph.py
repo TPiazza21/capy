@@ -12,22 +12,56 @@ from shapely.ops import cascaded_union
 
 import utm
 
+# to try to deal with projection issues (getting lat/long well out of [-90,90]^2)
+from pyproj import Proj, transform
+inProj = Proj(init='epsg:3857')
+outProj = Proj(init='epsg:4326')
+
 
 def utm_of_point(point):
-    return utm.from_latlon(point.y, point.x)[2]
+    #print "AT UTM_OF_POINT!!!" + str(point.x) + " " + str(point.y)
+    # the issue is LATITUDE, which I think is point.y
+
+
+
+
+
+    #return utm.from_latlon(point.y, point.x)[2]
+
+    # well, let's try the other thing, and see what happens...
+    # inProj and outProj are defined above
+    x1,y1 = point.x, point.y
+
+
+    # make sure that this is the correct transformation and that something else shouldn't be done
+    x1,y1 = transform(inProj,outProj,x1,y1)
+
+    return utm.from_latlon(y1, x1)[2]
+
+
 
 
 def identify_utm_zone(df):
+    # ok, this is what COULD be dicey...
+
     wgs_df = df.to_crs("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
+
+
+
     utm_counts = Counter(utm_of_point(point) for point in wgs_df['geometry'].centroid)
+
     # most_common returns a list of tuples, and we want the 0,0th entry
     most_common = utm_counts.most_common(1)[0][0]
+
+    # spits out 33, which is in Central Africa (i.e. not the United States)
     return most_common
 
 
 def reprojected(df):
     utm = identify_utm_zone(df)
-    return df.to_crs(f"+proj=utm +zone={utm} +ellps=WGS84 +datum=WGS84 +units=m +no_defs")
+    #return df.to_crs(f"+proj=utm +zone={utm} +ellps=WGS84 +datum=WGS84 +units=m +no_defs")
+    return_me = df.to_crs("+proj=utm +zone={} +ellps=WGS84 +datum=WGS84 +units=m +no_defs".format(utm))
+    return return_me
 
 
 def get_list_of_data(filepath, col_name, geoid=None):
@@ -144,12 +178,21 @@ def construct_graph_from_df(df_unprojected,
     :returns: NetworkX Graph.
 
     """
-    df = reprojected(df_unprojected)
+    #df = reprojected(df_unprojected)
+    # for now, maybe it makes sense to ignore these projections and just compute things
+    df = df_unprojected
 
     if id_col is not None:
+        # it went here
         df = df.set_index(id_col)
 
+    #print "printing df below..."
+    #print df
+
     # Generate rook neighbor lists from dataframe.
+    # now I am getting an error here...
+    # the geometry column name is supposedly just "geometry"
+    print df.geometry.name
     neighbors = pysal.weights.Rook.from_dataframe(
         df, geom_col=df.geometry.name).neighbors
 
@@ -167,7 +210,9 @@ def construct_graph_from_df(df_unprojected,
         pops = df[pop_col].to_dict()
         p_name = pop_col
     else:
-        warnings.warn("No population column was given, assuming all 0")
+        pass
+        # NOTE from Tyler - for the 1990 data, I don't think there was a population column, but I'm happy to sum them later
+        # warnings.warn("No population column was given, assuming all 0")
 
     a_name = "areas"
     if area_col:
@@ -176,7 +221,7 @@ def construct_graph_from_df(df_unprojected,
     else:
         # This may be slightly expensive, so only do it if we know we have to.
         areas = reprojected(df)['geometry'].area.to_dict()
-        warnings.warn("No area column was given, computing from geometry")
+        #warnings.warn("No area column was given, computing from geometry")
 
     dists = 0
     d_name = "CD"
@@ -186,7 +231,8 @@ def construct_graph_from_df(df_unprojected,
         dists = df[district_col].to_dict()
         d_name = district_col
     else:
-        warnings.warn("No district assignment column was given, assuming all 0")
+        pass
+        #warnings.warn("No district assignment column was given, assuming all 0")
 
     # add new attribute to all nodes with value 0 used as dummy variable
     networkx.set_node_attributes(graph, name=p_name, values=pops)
@@ -246,6 +292,7 @@ def construct_graph_from_file(filename,
 
     """
     df = gp.read_file(filename)
+
 
     return construct_graph_from_df(df, id_col, pop_col, area_col, district_col, cols_to_add)
 
